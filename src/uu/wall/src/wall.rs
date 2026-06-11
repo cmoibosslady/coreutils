@@ -16,8 +16,13 @@ const OPT_TIMEOUT: &str = "timeout";
 
 #[uucore::main(no_signals)]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-
-    let mut args = args.skip(1).peekable();
+    let args = args.skip(1).peekable();
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
+    match matches.get_one::<&str>(OPT_GROUP) {
+        Some(id) => { println!("Group option is set: {id} "); }
+        None => { println!("No group option set"); }
+    }
+    Ok(())
 }
 
 pub fn uu_app() -> Command {
@@ -32,6 +37,7 @@ pub fn uu_app() -> Command {
                 .value_name("GROUP")
                 .help(translate!("wall-help-group"))
                 .num_args(1)
+                .action(ArgAction::Append) // User can target more than one group
         )
         .arg(
             Arg::new(OPT_NOBANNER)
@@ -56,39 +62,43 @@ pub fn uu_app() -> Command {
 }
 
 
-fn get_message(args: impl uucore::Args) -> UResult<()> {
+// fn get_message(args: impl uucore::Args) -> UResult<()> {
+//     Ok(())
+// }
 
-}
+// fn find_logged_users() -> UResult<()> {
+//     Ok(())
+// }
 
-fn find_logged_users() -> UResult<()> {
-
-}
-
-fn write_to_terminals() -> UResult<()> {
-
-}
+// fn write_to_terminals() -> UResult<()> {
+//     Ok(())
+// }
 
 #[cfg(test)]
 mod tests {
     use std::io::{BufWriter, stdout};
 
     #[test]
-    fn test_write_to_terminals() {
-        let mut writer = BufWriter::new(stdout());
-        // Here you would call the function that writes to terminals
-        // and assert the expected output.
-    }
+    fn test_clap_implementation() {
 
-    #[test]
-    fn test_find_logged_users() {
-        // Here you would call the function that finds logged users
-        // and assert the expected output.
     }
+    // #[test]
+    // fn test_write_to_terminals() {
+    //     let mut writer = BufWriter::new(stdout());
+    //     // Here you would call the function that writes to terminals
+    //     // and assert the expected output.
+    // }
 
-    #[test]
-    fn test_get_message() {
-        // Here you would call the function that gets the message
-        // and assert the expected output.
-    }
+    // #[test]
+    // fn test_find_logged_users() {
+    //     // Here you would call the function that finds logged users
+    //     // and assert the expected output.
+    // }
+
+    // #[test]
+    // fn test_get_message() {
+    //     // Here you would call the function that gets the message
+    //     // and assert the expected output.
+    // }
 }
 
