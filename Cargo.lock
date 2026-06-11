@@ -3142,6 +3142,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uu-wall"
+version = "0.9.0"
+dependencies = [
+ "clap",
+ "fluent",
+ "uucore",
+]
+
+[[package]]
 name = "uu_arch"
 version = "0.9.0"
 dependencies = [
