@@ -9,3 +9,5 @@ wall-help-timeout = Abandon the write attempt to the terminal after timeout seco
 
 # Error messages
 wall-error-no-such-file = { $program }: can't read { $file }: No such file or directory
+wall-encoding-error = { $program }: data could not be decoded as UTF-8 
+wall-error-stdin = { $program }: can't read standard input
