@@ -4,7 +4,14 @@
 // file that was distributed with this source code.
 
 use clap::builder::ValueParser;
+use clap::parser::ValuesRef;
 use clap::{Arg, ArgAction, Command};
+use thiserror::Error;
+use std::ffi::OsString;
+use std::io;
+use std::io::prelude::*;
+use std::string::FromUtf8Error;
+
 use uucore::error::UResult;
 use uucore::format_usage;
 
@@ -14,14 +21,18 @@ const OPT_GROUP: &str = "group";
 const OPT_NOBANNER: &str = "nobanner";
 const OPT_TIMEOUT: &str = "timeout";
 
+#[derive(Error, Debug)]
+enum WallError {
+    #[error("{}", translate!("wall-error-stdin"))]
+    Stdin(#[from] io::Error),
+    #[error("{}", translate!("wall-encoding-error"))]
+    VecToString(#[from] FromUtf8Error),
+}
+
 #[uucore::main(no_signals)]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let args = args.skip(1).peekable();
-    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
-    match matches.get_one::<&str>(OPT_GROUP) {
-        Some(id) => { println!("Group option is set: {id} "); }
-        None => { println!("No group option set"); }
-    }
+    let _matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
     Ok(())
 }
 
@@ -38,6 +49,7 @@ pub fn uu_app() -> Command {
                 .help(translate!("wall-help-group"))
                 .num_args(1)
                 .action(ArgAction::Append) // User can target more than one group
+                .value_parser(clap::value_parser!(String))
         )
         .arg(
             Arg::new(OPT_NOBANNER)
@@ -62,9 +74,26 @@ pub fn uu_app() -> Command {
 }
 
 
-// fn get_message(args: impl uucore::Args) -> UResult<()> {
-//     Ok(())
-// }
+fn get_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
+    if args.len() == 0 {
+        read_from_stdin()
+    } else {
+        // open file
+        if args.len() == 1 {
+            Ok(String::from("Look for this file: {args.peekable()}"))
+        } else {
+            Ok(String::from("many message"))
+        }
+        // if not macOS print message
+    }
+}
+
+fn read_from_stdin() -> Result<String, WallError> {
+    let mut buffer = Vec::new();
+    io::stdin().read_to_end(&mut buffer)?;
+    let res = String::from_utf8(buffer)?;
+    Ok(res)
+}
 
 // fn find_logged_users() -> UResult<()> {
 //     Ok(())
@@ -76,12 +105,23 @@ pub fn uu_app() -> Command {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufWriter, stdout};
+
+    use crate::{uu_app, get_message};
+    use crate::{OPT_GROUP, STRING};
+    use std::ffi::OsString;
+    use std::process::{Command, Output};
 
     #[test]
-    fn test_clap_implementation() {
-
+    fn test_basic_clap_implementation() {
+        let group = String::from("staff");
+        let file = String::from("LICENSE");
+        let command = vec!("wall", "-g", &group, &file);
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command).expect("Error
+            outside of test perimeter");
+        assert!(matches.get_one::<String>(OPT_GROUP).unwrap() == &group);
+        assert!(matches.get_one::<OsString>(STRING).unwrap().clone().into_string().unwrap() == file);
     }
+
     // #[test]
     // fn test_write_to_terminals() {
     //     let mut writer = BufWriter::new(stdout());
@@ -95,10 +135,60 @@ mod tests {
     //     // and assert the expected output.
     // }
 
-    // #[test]
-    // fn test_get_message() {
-    //     // Here you would call the function that gets the message
-    //     // and assert the expected output.
-    // }
+    #[test]
+    fn test_get_message_on_file() {
+        let file = String::from("LICENSE");
+
+        // wall does not print the content of the file in the stdout, it sends it to the tty(s)
+        // Hence the use of cat to check if the get_message function can extract correctly the
+        // file
+        let mut command = Command::new("cat");
+        command.arg(&file);
+        let output: Output = match command.output() {
+            Ok(o) => o,
+            Err(_) => panic!("Failed to start 'cat' command")
+        };
+        if !output.status.success() {
+            panic!("'cat' command exit with failure status")
+        }
+        let command_output = match String::from_utf8(output.stdout) {
+            Ok(o) => o,
+            Err(_) => panic!("Failed to convert 'cat' output")
+        };
+
+        let command = vec!("wall", &file);
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
+        command).expect("External error");
+        let pos_arg = matches.get_many(STRING)
+            .expect("Cannot extract positional arguments")
+            .clone();
+        let function_output = get_message(pos_arg).unwrap();
+        assert_eq!(function_output, command_output);
+    }
+
+    #[test]
+    fn test_get_message_on_stdin() {
+        let mut command = Command::new("cat");
+        let output: Output = match command.output() {
+            Ok(o) => o,
+            Err(_) => panic!("Failed to start 'cat' command")
+        };
+        if !output.status.success() {
+            panic!("'cat' command exit with failure status")
+        }
+        let command_output = match String::from_utf8(output.stdout) {
+            Ok(o) => o,
+            Err(_) => panic!("Failed to convert 'cat' output")
+        };
+
+        let command = vec!("wall");
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
+        command).expect("External error");
+        let pos_arg = matches.get_many(STRING)
+            .expect("Cannot extract position arguments")
+            .clone();
+        let function_output = get_message(pos_arg).unwrap();
+        assert_eq!(function_output, command_output);
+    }
 }
 
