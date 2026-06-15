@@ -12,3 +12,5 @@ wall-error-no-such-file = { $program }: can't read { $file }: No such file or di
 wall-encoding-error = { $program }: data could not be decoded as UTF-8
 wall-error-stdin = { $program }: can't read standard input
 wall-error-osstring = { $program }: can't convert OS string to String
+wall-error-mac-os-too-many-args = { $program }: too many arguments, only one argument is expected
+wall-error-open-terminal = { $program }: can't open terminal for writing
