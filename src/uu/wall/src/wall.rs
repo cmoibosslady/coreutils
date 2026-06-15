@@ -27,6 +27,8 @@ enum WallError {
     Stdin(#[from] io::Error),
     #[error("{}", translate!("wall-encoding-error"))]
     VecToString(#[from] FromUtf8Error),
+    #[error("{}", translate!("wall-error-osstring"))]
+    ToStringError,
 }
 
 #[uucore::main(no_signals)]
@@ -81,7 +83,7 @@ fn get_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
         if args.len() == 1 {
             read_from_file(args.into_iter().next().unwrap())
         } else {
-            Ok(String::from("many message"))
+            concatenate_message(args)
         }
         // if not macOS print message
     }
@@ -105,8 +107,10 @@ fn read_from_file(file: &OsString) -> Result<String, WallError> {
 fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     let mut res = String::new();
     for arg in args {
-        res.push_str(arg);
+        res.push_str(arg.to_str().ok_or(WallError::ToStringError)?);
+        res.push(' ');
     }
+    res.pop();
     Ok(res)
 
 }
@@ -139,19 +143,6 @@ mod tests {
         assert!(matches.get_one::<String>(OPT_GROUP).unwrap() == &group);
         assert!(matches.get_one::<OsString>(STRING).unwrap().clone().into_string().unwrap() == file);
     }
-
-    // #[test]
-    // fn test_write_to_terminals() {
-    //     let mut writer = BufWriter::new(stdout());
-    //     // Here you would call the function that writes to terminals
-    //     // and assert the expected output.
-    // }
-
-    // #[test]
-    // fn test_find_logged_users() {
-    //     // Here you would call the function that finds logged users
-    //     // and assert the expected output.
-    // }
 
     #[test]
     fn test_get_message_on_file() {
@@ -219,6 +210,19 @@ mod tests {
         };
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, "Hello !\n");
+    }
+
+    #[test]
+    fn test_arguments_as_message() {
+        let command = vec!("wall", "Hello", "World", "!");
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
+        command).expect("External error");
+        let pos_arg = match matches.get_many(STRING) {
+            Some(o) => o,
+            None => ValuesRef::<OsString>::default(),
+        };
+        let function_output = get_message(pos_arg).unwrap();
+        assert_eq!(function_output, "Hello World !");
     }
 }
 
