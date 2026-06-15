@@ -12,3 +12,4 @@ wall-error-no-such-file = { $program }: ne peut pas lire { $file }: Aucun fichie
 ce type
 wall-encoding-error = { $program }: échec de la conversion vers UTF-8
 wall-error-stdin = { $program }: échec de la lecture dans le terminal
+wall-error-osstring = { $program }: échec de la conversion de la chaîne OS en chaîne
