@@ -106,10 +106,12 @@ fn read_from_stdin() -> Result<String, WallError> {
 #[cfg(test)]
 mod tests {
 
+    use clap::parser::ValuesRef;
     use crate::{uu_app, get_message};
     use crate::{OPT_GROUP, STRING};
     use std::ffi::OsString;
-    use std::process::{Command, Output};
+    use std::io::Write;
+    use std::process::{Command, Output, Stdio};
 
     #[test]
     fn test_basic_clap_implementation() {
@@ -159,20 +161,29 @@ mod tests {
         let command = vec!("wall", &file);
         let matches = uucore::clap_localization::handle_clap_result(uu_app(),
         command).expect("External error");
-        let pos_arg = matches.get_many(STRING)
-            .expect("Cannot extract positional arguments")
-            .clone();
+        let pos_arg = match matches.get_many(STRING) {
+            Some(o) => o,
+            None => ValuesRef::<OsString>::default(),
+        };
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, command_output);
     }
 
     #[test]
     fn test_get_message_on_stdin() {
-        let mut command = Command::new("cat");
-        let output: Output = match command.output() {
-            Ok(o) => o,
-            Err(_) => panic!("Failed to start 'cat' command")
-        };
+        let testing_message = "Hello !\n";
+        let mut binding = Command::new("cat");
+        let mut cat_command = binding.stdin(Stdio::piped());
+        let mut child = cat_command.spawn().expect("Cannot init 'cat' command");
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(testing_message.as_bytes())
+                .expect("Cannot write into pipe");
+        }
+        drop(child.stdin);
+        let output: Output = child.wait_with_output()
+            .expect("Failed to wait for cat process");
+
         if !output.status.success() {
             panic!("'cat' command exit with failure status")
         }
@@ -184,9 +195,10 @@ mod tests {
         let command = vec!("wall");
         let matches = uucore::clap_localization::handle_clap_result(uu_app(),
         command).expect("External error");
-        let pos_arg = matches.get_many(STRING)
-            .expect("Cannot extract position arguments")
-            .clone();
+        let pos_arg = match matches.get_many(STRING) {
+            Some(o) => o,
+            None => ValuesRef::<OsString>::default(),
+        };
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, command_output);
     }
