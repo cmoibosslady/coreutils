@@ -7,13 +7,15 @@ use clap::builder::ValueParser;
 use clap::parser::ValuesRef;
 use clap::{Arg, ArgAction, Command};
 use thiserror::Error;
+use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::io::prelude::*;
 use std::string::FromUtf8Error;
 
-use uucore::error::UResult;
+use uucore::error::{UResult, UError};
 use uucore::format_usage;
+use uucore::utmpx::Utmpx;
 
 use uucore::translate;
 const STRING: &str = "string";
@@ -29,12 +31,30 @@ enum WallError {
     VecToString(#[from] FromUtf8Error),
     #[error("{}", translate!("wall-error-osstring"))]
     ToStringError,
+    #[error("{}", translate!("wall-error-mac-os-too-many-args"))]
+    MacOsTooManyArgs,
+}
+
+impl UError for WallError {
+    fn code(&self) -> i32 {
+        // change this to watch wall error codes?
+        // match self {
+        //     WallError::Stdin(_) => 1,
+        //     WallError::VecToString(_) => 1,
+        //     WallError::ToStringError => 1,
+        //     WallError::MacOsTooManyArgs => 16 or 1,
+        // }
+        1
+    }
 }
 
 #[uucore::main(no_signals)]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let args = args.skip(1).peekable();
-    let _matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
+    let message = get_message(matches.get_many(STRING).unwrap_or_default())?;
+    let users = find_logged_users()?;
+    write_to_terminals(message, users)?;
     Ok(())
 }
 
@@ -83,9 +103,12 @@ fn get_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
         if args.len() == 1 {
             read_from_file(args.into_iter().next().unwrap())
         } else {
-            concatenate_message(args)
+            if cfg!(target_os = "macos") {
+                Err(WallError::MacOsTooManyArgs)
+            } else {
+                concatenate_message(args)
+            }
         }
-        // if not macOS print message
     }
 }
 
@@ -115,23 +138,47 @@ fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
 
 }
 
-// fn find_logged_users() -> UResult<()> {
-//     Ok(())
-// }
+fn find_logged_users() -> Result<Vec<String>, WallError> {
+    let mut res = Vec::<String>::new();
+    for ut in Utmpx::iter_all_records() {
+        if ut.is_user_process()  { // it's a user's tty
+            let tty_path = String::from("/dev/") +
+                &ut.tty_device().to_string();
+            res.push(tty_path);
+        }
+    }
+    Ok(res)
+}
 
-// fn write_to_terminals() -> UResult<()> {
-//     Ok(())
-// }
+fn wall_intro_message() -> String {
+    // retreive user + hostname from terminal
+    // retreive date
+    let home = "USER";
+    let hostname = "HOSTNAME";
+    let home = env::var_os(home).unwrap_or_default();
+    let hostname = env::var_os(hostname).unwrap_or_default();
+    format!("Broadcast message from {}@{}:\n", home.to_string_lossy(), hostname.to_string_lossy())
+}
+
+fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
+    let transmission = wall_intro_message() + &message;
+    for user in users {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(user)?;
+        file.write_all(transmission.as_bytes())?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
 
     use clap::parser::ValuesRef;
-    use crate::{uu_app, get_message};
+    use crate::{uu_app, get_message, find_logged_users, write_to_terminals};
     use crate::{OPT_GROUP, STRING};
     use std::ffi::OsString;
-    use std::io::Write;
-    use std::process::{Command, Output, Stdio};
+    use std::process::{Command, Output};
 
     #[test]
     fn test_basic_clap_implementation() {
@@ -223,6 +270,18 @@ mod tests {
         };
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, "Hello World !");
+    }
+
+    #[test]
+    fn test_found_connected_users() {
+        let users = find_logged_users().unwrap();
+        assert_eq!(users, vec!(String::from("tty1"), String::from("tty2"), String::from("tty3")));
+    }
+
+    #[test]
+    fn test_print_to_terminals() {
+        let users = find_logged_users().unwrap();
+        let result = write_to_terminals(String::from("hello world!"), users);
     }
 }
 

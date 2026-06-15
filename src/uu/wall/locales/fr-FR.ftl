@@ -13,3 +13,4 @@ ce type
 wall-encoding-error = { $program }: échec de la conversion vers UTF-8
 wall-error-stdin = { $program }: échec de la lecture dans le terminal
 wall-error-osstring = { $program }: échec de la conversion de la chaîne OS en chaîne
+wall-error-mac-os-too-many-args = { $program }: trop d'arguments, un seul argument est attendu
