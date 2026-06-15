@@ -78,9 +78,8 @@ fn get_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     if args.len() == 0 {
         read_from_stdin()
     } else {
-        // open file
         if args.len() == 1 {
-            Ok(String::from("Look for this file: {args.peekable()}"))
+            read_from_file(args.into_iter().next().unwrap())
         } else {
             Ok(String::from("many message"))
         }
@@ -93,6 +92,23 @@ fn read_from_stdin() -> Result<String, WallError> {
     io::stdin().read_to_end(&mut buffer)?;
     let res = String::from_utf8(buffer)?;
     Ok(res)
+}
+
+fn read_from_file(file: &OsString) -> Result<String, WallError> {
+    let mut buffer = Vec::new();
+    let mut file = std::fs::File::open(file)?;
+    file.read_to_end(&mut buffer)?;
+    let res = String::from_utf8(buffer)?;
+    Ok(res)
+}
+
+fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
+    let mut res = String::new();
+    for arg in args {
+        res.push_str(arg);
+    }
+    Ok(res)
+
 }
 
 // fn find_logged_users() -> UResult<()> {
@@ -171,26 +187,28 @@ mod tests {
 
     #[test]
     fn test_get_message_on_stdin() {
-        let testing_message = "Hello !\n";
-        let mut binding = Command::new("cat");
-        let mut cat_command = binding.stdin(Stdio::piped());
-        let mut child = cat_command.spawn().expect("Cannot init 'cat' command");
+        // for the moment test against cat is not implemented
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(testing_message.as_bytes())
-                .expect("Cannot write into pipe");
-        }
-        drop(child.stdin);
-        let output: Output = child.wait_with_output()
-            .expect("Failed to wait for cat process");
+        // let testing_message = "Hello !\n";
+        // let mut binding = Command::new("cat");
+        // let mut cat_command = binding.stdin(Stdio::piped());
+        // let mut child = cat_command.spawn().expect("Cannot init 'cat' command");
 
-        if !output.status.success() {
-            panic!("'cat' command exit with failure status")
-        }
-        let command_output = match String::from_utf8(output.stdout) {
-            Ok(o) => o,
-            Err(_) => panic!("Failed to convert 'cat' output")
-        };
+        // if let Some(mut stdin) = child.stdin.take() {
+        //     stdin.write_all(testing_message.as_bytes())
+        //         .expect("Cannot write into pipe");
+        // }
+        // drop(child.stdin);
+
+        // let output: Output = child.wait_with_output()
+        //     .expect("Failed to wait for cat process");
+        // if !output.status.success() {
+        //     panic!("'cat' command exit with failure status")
+        // }
+        // let command_output = match String::from_utf8(output.stdout) {
+        //     Ok(o) => o,
+        //     Err(_) => panic!("Failed to convert 'cat' output")
+        // };
 
         let command = vec!("wall");
         let matches = uucore::clap_localization::handle_clap_result(uu_app(),
@@ -200,7 +218,7 @@ mod tests {
             None => ValuesRef::<OsString>::default(),
         };
         let function_output = get_message(pos_arg).unwrap();
-        assert_eq!(function_output, command_output);
+        assert_eq!(function_output, "Hello !\n");
     }
 }
 
