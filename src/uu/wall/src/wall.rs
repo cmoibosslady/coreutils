@@ -141,7 +141,7 @@ fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
 fn find_logged_users() -> Result<Vec<String>, WallError> {
     let mut res = Vec::<String>::new();
     for ut in Utmpx::iter_all_records() {
-        if ut.is_user_process()  { // it's a user's tty
+        if ut.is_user_process() { // it's a user's tty
             let tty_path = String::from("/dev/") +
                 &ut.tty_device().to_string();
             res.push(tty_path);
@@ -157,15 +157,27 @@ fn wall_intro_message() -> String {
     let hostname = "HOSTNAME";
     let home = env::var_os(home).unwrap_or_default();
     let hostname = env::var_os(hostname).unwrap_or_default();
-    format!("Broadcast message from {}@{}:\n", home.to_string_lossy(), hostname.to_string_lossy())
+    let tty = String::from("/dev/what>"); // can take it from uucore ? -> tty.rs already coded
+    let date = String::from("MONDAY"); // date.rs exist in uucore
+    format!("Broadcast message from {}@{} ({}) ({})\n\n",
+        home.to_string_lossy(),
+        hostname.to_string_lossy(),
+        tty,
+        date)
 }
 
 fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
     let transmission = wall_intro_message() + &message;
     for user in users {
-        let mut file = std::fs::OpenOptions::new()
+        let mut file = match std::fs::OpenOptions::new()
             .write(true)
-            .open(user)?;
+            .open(user) {
+                Ok(f) => f,
+                Err(e) => {
+                eprintln!("{}: {}", translate!("wall-error-open-terminal"), e);
+                continue;
+                }
+            };
         file.write_all(transmission.as_bytes())?;
     }
     Ok(())
@@ -226,28 +238,6 @@ mod tests {
     #[test]
     fn test_get_message_on_stdin() {
         // for the moment test against cat is not implemented
-
-        // let testing_message = "Hello !\n";
-        // let mut binding = Command::new("cat");
-        // let mut cat_command = binding.stdin(Stdio::piped());
-        // let mut child = cat_command.spawn().expect("Cannot init 'cat' command");
-
-        // if let Some(mut stdin) = child.stdin.take() {
-        //     stdin.write_all(testing_message.as_bytes())
-        //         .expect("Cannot write into pipe");
-        // }
-        // drop(child.stdin);
-
-        // let output: Output = child.wait_with_output()
-        //     .expect("Failed to wait for cat process");
-        // if !output.status.success() {
-        //     panic!("'cat' command exit with failure status")
-        // }
-        // let command_output = match String::from_utf8(output.stdout) {
-        //     Ok(o) => o,
-        //     Err(_) => panic!("Failed to convert 'cat' output")
-        // };
-
         let command = vec!("wall");
         let matches = uucore::clap_localization::handle_clap_result(uu_app(),
         command).expect("External error");
