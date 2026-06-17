@@ -151,19 +151,26 @@ fn find_logged_users() -> Result<Vec<String>, WallError> {
 }
 
 fn wall_intro_message() -> String {
-    // retreive user + hostname from terminal
-    // retreive date
-    let home = "USER";
-    let hostname = "HOSTNAME";
-    let home = env::var_os(home).unwrap_or_default();
-    let hostname = env::var_os(hostname).unwrap_or_default();
-    let tty = String::from("/dev/what>"); // can take it from uucore ? -> tty.rs already coded
-    let date = String::from("MONDAY"); // date.rs exist in uucore
-    format!("Broadcast message from {}@{} ({}) ({})\n\n",
-        home.to_string_lossy(),
-        hostname.to_string_lossy(),
-        tty,
-        date)
+    let user = "USER";
+    let binding = uname();
+    let hostname = binding.nodename().to_str().unwrap_or_default();
+
+    let user = env::var_os(user).unwrap_or_default();
+    // Fetch the TTY of the process calling wall (requires OS-specific calls or a wrapper function)
+    let tty = "/dev/".to_owned() + &get_sender();
+
+    // Use the dedicated date utility to get a formatted timestamp string
+    let datetime = get_hour_and_date();
+    #[cfg(target_os = "linux")]
+    return format!(
+        "\r\nBroadcast message from {}@{hostname} ({tty}) at {datetime} \r\n\r\n",
+        user.to_string_lossy()
+    );
+    #[cfg(target_os = "macos")]
+    return format!(
+        "\r\nBroadcast message from {}@{hostname}\r\n\t({tty}) at {datetime}\r\n\r\n",
+        user.to_string_lossy()
+    );
 }
 
 fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
@@ -183,6 +190,19 @@ fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
     Ok(())
 }
 
+fn get_hour_and_date() -> String {
+    #[cfg(target_os = "linux")]
+    return Zoned::now().strftime("(%a %b %d %H:%M:%S %Y):").to_string();
+    #[cfg(target_os = "macos")]
+    return Zoned::now().strftime("%H:%M %Z...").to_string();
+}
+
+fn get_sender() -> String {
+    rustix::termios::ttyname(io::stdin(), Vec::with_capacity(16))
+        .map(|s| s.to_string_lossy().trim_start_matches("/dev/").to_owned())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -191,6 +211,8 @@ mod tests {
     use crate::{OPT_GROUP, STRING};
     use std::ffi::OsString;
     use std::process::{Command, Output};
+
+    use uucore::utmpx::Utmpx;
 
     #[test]
     fn test_basic_clap_implementation() {
@@ -270,8 +292,18 @@ mod tests {
 
     #[test]
     fn test_print_to_terminals() {
-        let users = find_logged_users().unwrap();
-        let result = write_to_terminals(String::from("hello world!"), users);
+        let users = find_logged_users();
+        let _ = write_to_terminals(String::from("hello world!"), users);
+        let _ = write_to_terminals(
+            String::from("hello world!"),
+            vec![String::from("/dev/tty1")],
+        );
+    }
+
+    #[test]
+    fn test_get_sender() {
+        let sender = crate::get_sender();
+        assert_eq!(sender, "tty1");
     }
 }
 

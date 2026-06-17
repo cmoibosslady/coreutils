@@ -11,9 +11,14 @@ version.workspace = true
 
 [dependencies]
 clap = { workspace = true }
-uucore = { workspace = true, features = ["utmpx"] }
 fluent = { workspace = true }
 thiserror.workspace = true
+jiff = { workspace = true }
+rustix = { workspace = true, features = ["system"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+uucore = { workspace = true, features = ["utmpx", "feat_systemd_logind"] }
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+uucore = { workspace = true, features = ["utmpx"] }
 
 [lints]
 workspace = true
