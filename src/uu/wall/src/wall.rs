@@ -6,14 +6,16 @@
 use clap::builder::ValueParser;
 use clap::parser::ValuesRef;
 use clap::{Arg, ArgAction, Command};
-use thiserror::Error;
+use jiff::Zoned;
+use rustix::system::uname;
 use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::io::prelude::*;
 use std::string::FromUtf8Error;
+use thiserror::Error;
 
-use uucore::error::{UResult, UError};
+use uucore::error::{UError, UResult};
 use uucore::format_usage;
 use uucore::utmpx::Utmpx;
 
@@ -37,13 +39,6 @@ enum WallError {
 
 impl UError for WallError {
     fn code(&self) -> i32 {
-        // change this to watch wall error codes?
-        // match self {
-        //     WallError::Stdin(_) => 1,
-        //     WallError::VecToString(_) => 1,
-        //     WallError::ToStringError => 1,
-        //     WallError::MacOsTooManyArgs => 16 or 1,
-        // }
         1
     }
 }
@@ -53,7 +48,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let args = args.skip(1).peekable();
     let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
     let message = get_message(matches.get_many(STRING).unwrap_or_default())?;
-    let users = find_logged_users()?;
+    let users = find_logged_users();
     write_to_terminals(message, users)?;
     Ok(())
 }
@@ -71,14 +66,14 @@ pub fn uu_app() -> Command {
                 .help(translate!("wall-help-group"))
                 .num_args(1)
                 .action(ArgAction::Append) // User can target more than one group
-                .value_parser(clap::value_parser!(String))
+                .value_parser(clap::value_parser!(String)),
         )
         .arg(
             Arg::new(OPT_NOBANNER)
                 .short('n')
                 .long(OPT_NOBANNER)
                 .action(ArgAction::SetTrue)
-                .help(translate!("wall-help-nobanner"))
+                .help(translate!("wall-help-nobanner")),
         )
         .arg(
             Arg::new(OPT_TIMEOUT)
@@ -86,29 +81,24 @@ pub fn uu_app() -> Command {
                 .long(OPT_TIMEOUT)
                 .value_name("SECONDS")
                 .help(translate!("wall-help-timeout"))
-                .num_args(1)
+                .num_args(1),
         )
         .arg(
             Arg::new(STRING)
                 .action(ArgAction::Append)
-                .value_parser(ValueParser::os_string())
+                .value_parser(ValueParser::os_string()),
         )
 }
-
 
 fn get_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     if args.len() == 0 {
         read_from_stdin()
+    } else if args.len() == 1 {
+        read_from_file(args.into_iter().next().unwrap())
+    } else if cfg!(target_os = "macos") {
+        Err(WallError::MacOsTooManyArgs)
     } else {
-        if args.len() == 1 {
-            read_from_file(args.into_iter().next().unwrap())
-        } else {
-            if cfg!(target_os = "macos") {
-                Err(WallError::MacOsTooManyArgs)
-            } else {
-                concatenate_message(args)
-            }
-        }
+        concatenate_message(args)
     }
 }
 
@@ -135,60 +125,79 @@ fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     }
     res.pop();
     Ok(res)
-
 }
 
-fn find_logged_users() -> Result<Vec<String>, WallError> {
+fn find_logged_users() -> Vec<String> {
     let mut res = Vec::<String>::new();
     for ut in Utmpx::iter_all_records() {
-        if ut.is_user_process() { // it's a user's tty
-            let tty_path = String::from("/dev/") +
-                &ut.tty_device().to_string();
+        if ut.is_user_process() {
+            let tty_path = String::from("/dev/") + &ut.tty_device().clone();
             res.push(tty_path);
         }
     }
-    Ok(res)
+    res
 }
 
 fn wall_intro_message() -> String {
-    // retreive user + hostname from terminal
-    // retreive date
-    let home = "USER";
-    let hostname = "HOSTNAME";
-    let home = env::var_os(home).unwrap_or_default();
-    let hostname = env::var_os(hostname).unwrap_or_default();
-    let tty = String::from("/dev/what>"); // can take it from uucore ? -> tty.rs already coded
-    let date = String::from("MONDAY"); // date.rs exist in uucore
-    format!("Broadcast message from {}@{} ({}) ({})\n\n",
-        home.to_string_lossy(),
-        hostname.to_string_lossy(),
-        tty,
-        date)
+    let user = "USER";
+    let binding = uname();
+    let hostname = binding.nodename().to_str().unwrap_or_default();
+
+    let user = env::var_os(user).unwrap_or_default();
+    // Fetch the TTY of the process calling wall (requires OS-specific calls or a wrapper function)
+    let tty = get_sender();
+
+    // Use the dedicated date utility to get a formatted timestamp string
+    let datetime = get_hour_and_date();
+    #[cfg(target_os = "linux")]
+    return format!(
+        "\r\nBroadcast message from {}@{hostname} ({tty}) at {datetime} \r\n\r\n",
+        user.to_string_lossy()
+    );
+    #[cfg(target_os = "macos")]
+    return format!(
+        "\r\nBroadcast message from {}@{hostname}\n\t({tty}) at {datetime}\r\n\r\n",
+        user.to_string_lossy()
+    );
 }
 
 fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
     let transmission = wall_intro_message() + &message;
     for user in users {
-        let mut file = match std::fs::OpenOptions::new()
-            .write(true)
-            .open(user) {
-                Ok(f) => f,
-                Err(e) => {
-                eprintln!("{}: {}", translate!("wall-error-open-terminal"), e);
+        let mut file = match std::fs::OpenOptions::new().write(true).open(user) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("{}: {e}", translate!("wall-error-open-terminal"));
                 continue;
-                }
-            };
+            }
+        };
         file.write_all(transmission.as_bytes())?;
     }
     Ok(())
 }
 
+fn get_hour_and_date() -> String {
+    #[cfg(target_os = "linux")]
+    return Zoned::now().strftime("(%a %b %d %H:%M%S %Q):").to_string();
+    #[cfg(target_os = "macos")]
+    return Zoned::now().strftime("%H:%M %Z...").to_string();
+}
+
+fn get_sender() -> String {
+    for ut in Utmpx::iter_all_records() {
+        if ut.is_user_process() {
+            println!("host {} and user {}", ut.terminal_suffix(), ut.tty_device());
+            return ut.terminal_suffix();
+        }
+    }
+    translate!("wall-unknown-tty")
+}
+
 #[cfg(test)]
 mod tests {
 
-    use clap::parser::ValuesRef;
-    use crate::{uu_app, get_message, find_logged_users, write_to_terminals};
     use crate::{OPT_GROUP, STRING};
+    use crate::{find_logged_users, get_message, uu_app, write_to_terminals};
     use std::ffi::OsString;
     use std::process::{Command, Output};
 
@@ -196,11 +205,19 @@ mod tests {
     fn test_basic_clap_implementation() {
         let group = String::from("staff");
         let file = String::from("LICENSE");
-        let command = vec!("wall", "-g", &group, &file);
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command).expect("Error
-            outside of test perimeter");
+        let command = vec!["wall", "-g", &group, &file];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("Error outside of test perimeter");
         assert!(matches.get_one::<String>(OPT_GROUP).unwrap() == &group);
-        assert!(matches.get_one::<OsString>(STRING).unwrap().clone().into_string().unwrap() == file);
+        assert!(
+            matches
+                .get_one::<OsString>(STRING)
+                .unwrap()
+                .clone()
+                .into_string()
+                .unwrap()
+                == file
+        );
     }
 
     #[test]
@@ -212,25 +229,18 @@ mod tests {
         // file
         let mut command = Command::new("cat");
         command.arg(&file);
-        let output: Output = match command.output() {
-            Ok(o) => o,
-            Err(_) => panic!("Failed to start 'cat' command")
-        };
-        if !output.status.success() {
-            panic!("'cat' command exit with failure status")
-        }
-        let command_output = match String::from_utf8(output.stdout) {
-            Ok(o) => o,
-            Err(_) => panic!("Failed to convert 'cat' output")
-        };
+        let output: Output = command.output().expect("Failed to start 'cat' command");
+        assert!(
+            output.status.success(),
+            "'cat' command exit with failure status"
+        );
+        let command_output =
+            String::from_utf8(output.stdout).expect("Failed to convert 'cat'output");
 
-        let command = vec!("wall", &file);
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
-        command).expect("External error");
-        let pos_arg = match matches.get_many(STRING) {
-            Some(o) => o,
-            None => ValuesRef::<OsString>::default(),
-        };
+        let command = vec!["wall", &file];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("External error");
+        let pos_arg = matches.get_many(STRING).unwrap_or_default();
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, command_output);
     }
@@ -238,40 +248,40 @@ mod tests {
     #[test]
     fn test_get_message_on_stdin() {
         // for the moment test against cat is not implemented
-        let command = vec!("wall");
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
-        command).expect("External error");
-        let pos_arg = match matches.get_many(STRING) {
-            Some(o) => o,
-            None => ValuesRef::<OsString>::default(),
-        };
+        let command = vec!["wall"];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("External error");
+        let pos_arg = matches.get_many(STRING).unwrap_or_default();
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, "Hello !\n");
     }
 
     #[test]
     fn test_arguments_as_message() {
-        let command = vec!("wall", "Hello", "World", "!");
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
-        command).expect("External error");
-        let pos_arg = match matches.get_many(STRING) {
-            Some(o) => o,
-            None => ValuesRef::<OsString>::default(),
-        };
+        let command = vec!["wall", "Hello", "World", "!"];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("External error");
+        let pos_arg = matches.get_many(STRING).unwrap_or_default();
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, "Hello World !");
     }
 
     #[test]
     fn test_found_connected_users() {
-        let users = find_logged_users().unwrap();
-        assert_eq!(users, vec!(String::from("tty1"), String::from("tty2"), String::from("tty3")));
+        let users = find_logged_users();
+        assert_eq!(
+            users,
+            vec!(
+                String::from("tty1"),
+                String::from("tty2"),
+                String::from("tty3")
+            )
+        );
     }
 
     #[test]
     fn test_print_to_terminals() {
-        let users = find_logged_users().unwrap();
-        let result = write_to_terminals(String::from("hello world!"), users);
+        let users = find_logged_users();
+        let _ = write_to_terminals(String::from("hello world!"), users);
     }
 }
-
