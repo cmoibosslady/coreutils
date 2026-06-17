@@ -184,13 +184,9 @@ fn get_hour_and_date() -> String {
 }
 
 fn get_sender() -> String {
-    for ut in Utmpx::iter_all_records() {
-        if ut.is_user_process() {
-            println!("host {} and user {}", ut.terminal_suffix(), ut.tty_device());
-            return ut.terminal_suffix();
-        }
-    }
-    translate!("wall-unknown-tty")
+    rustix::termios::ttyname(io::stdin(), Vec::with_capacity(16))
+        .map(|s| s.to_string_lossy().trim_start_matches("/dev/").to_owned())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -283,5 +279,11 @@ mod tests {
     fn test_print_to_terminals() {
         let users = find_logged_users();
         let _ = write_to_terminals(String::from("hello world!"), users);
+    }
+
+    #[test]
+    fn test_get_sender() {
+        let sender = crate::get_sender();
+        assert_eq!(sender, "tty1");
     }
 }
