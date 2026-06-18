@@ -13,5 +13,6 @@ wall-error-stdin = { $program }: can't read standard input
 wall-error-osstring = { $program }: can't convert OS string to String
 wall-error-mac-os-too-many-args = { $program }: too many arguments, only one argument is expected
 wall-error-open-terminal = { $program }: can't open terminal for writing
+wall-error-write-terminal = { $program }: can't write into terminal
 wall-unknown-date = unknown date
 wall-unknown-tty = unknown origin

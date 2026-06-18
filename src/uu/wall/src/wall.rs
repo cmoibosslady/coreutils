@@ -171,7 +171,10 @@ fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
                 continue;
             }
         };
-        file.write_all(transmission.as_bytes())?;
+        write!(file, "{transmission}").map_err(|e| {
+            eprintln!("{}:, {e}", translate!("wall-error-write-terminal"));
+            WallError::Stdin(e)
+        })?;
     }
     Ok(())
 }
@@ -196,8 +199,6 @@ mod tests {
     use crate::{find_logged_users, get_message, uu_app, write_to_terminals};
     use std::ffi::OsString;
     use std::process::{Command, Output};
-
-    use uucore::utmpx::Utmpx;
 
     #[test]
     fn test_basic_clap_implementation() {
