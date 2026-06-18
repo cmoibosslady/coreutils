@@ -156,7 +156,7 @@ fn wall_intro_message() -> String {
     );
     #[cfg(target_os = "macos")]
     return format!(
-        "\r\nBroadcast message from {}@{hostname}\n\t({tty}) at {datetime}\r\n\r\n",
+        "\r\nBroadcast message from {}@{hostname}\r\n\t({tty}) at {datetime}\r\n\r\n",
         user.to_string_lossy()
     );
 }
@@ -264,12 +264,6 @@ mod tests {
         assert_eq!(function_output, "Hello World !");
     }
 
-    #[test]
-    fn test_utmpx_works() {
-        for ut in Utmpx::iter_all_records() {
-            println!("{:?}", ut.user());
-        }
-    }
     #[test]
     fn test_found_connected_users() {
         let users = find_logged_users();
