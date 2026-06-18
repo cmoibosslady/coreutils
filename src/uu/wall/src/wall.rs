@@ -162,7 +162,7 @@ fn wall_intro_message() -> String {
 }
 
 fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
-    let transmission = wall_intro_message() + &message;
+    let transmission = wall_intro_message() + &message + "\r\n\r\n";
     for user in users {
         let mut file = match std::fs::OpenOptions::new().write(true).open(user) {
             Ok(f) => f,
@@ -286,6 +286,6 @@ mod tests {
     #[test]
     fn test_get_sender() {
         let sender = crate::get_sender();
-        assert_eq!(sender, "tty1");
+        assert_eq!(sender, "pts/0");
     }
 }
