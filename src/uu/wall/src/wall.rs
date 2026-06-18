@@ -145,7 +145,7 @@ fn wall_intro_message() -> String {
 
     let user = env::var_os(user).unwrap_or_default();
     // Fetch the TTY of the process calling wall (requires OS-specific calls or a wrapper function)
-    let tty = String::from("/dev/".to_owned() + &get_sender());
+    let tty = "/dev/".to_owned() + &get_sender();
 
     // Use the dedicated date utility to get a formatted timestamp string
     let datetime = get_hour_and_date();
@@ -196,6 +196,8 @@ mod tests {
     use crate::{find_logged_users, get_message, uu_app, write_to_terminals};
     use std::ffi::OsString;
     use std::process::{Command, Output};
+
+    use uucore::utmpx::Utmpx;
 
     #[test]
     fn test_basic_clap_implementation() {
@@ -263,6 +265,12 @@ mod tests {
     }
 
     #[test]
+    fn test_utmpx_works() {
+        for ut in Utmpx::iter_all_records() {
+            println!("{:?}", ut.user());
+        }
+    }
+    #[test]
     fn test_found_connected_users() {
         let users = find_logged_users();
         assert_eq!(
@@ -279,8 +287,10 @@ mod tests {
     fn test_print_to_terminals() {
         let users = find_logged_users();
         let _ = write_to_terminals(String::from("hello world!"), users);
-        let _ = write_to_terminals(String::from("hello world!"),
-        vec![String::from("/dev/tty1")]);
+        let _ = write_to_terminals(
+            String::from("hello world!"),
+            vec![String::from("/dev/tty1")],
+        );
     }
 
     #[test]
