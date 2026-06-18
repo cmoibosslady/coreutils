@@ -6,7 +6,8 @@
 use clap::builder::ValueParser;
 use clap::parser::ValuesRef;
 use clap::{Arg, ArgAction, Command};
-use thiserror::Error;
+use jiff::Zoned;use thiserror::Error;
+use rustix::system::uname;
 use std::env;
 use std::ffi::OsString;
 use std::io;
@@ -53,7 +54,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let args = args.skip(1).peekable();
     let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
     let message = get_message(matches.get_many(STRING).unwrap_or_default())?;
-    let users = find_logged_users()?;
+    let users = find_logged_users();
     write_to_terminals(message, users)?;
     Ok(())
 }
@@ -64,7 +65,8 @@ pub fn uu_app() -> Command {
         .about(translate!("wall-about"))
         .override_usage(format_usage(&translate!("pwd-usage")))
         .arg(
-            Arg::new(OPT_GROUP)
+            Arg::new(OPT_GROUP) // TODO(FEAT): Implement -g/--groups to target specific
+                // users inside a group
                 .short('g')
                 .long(OPT_GROUP)
                 .value_name("GROUP")
@@ -74,14 +76,16 @@ pub fn uu_app() -> Command {
                 .value_parser(clap::value_parser!(String))
         )
         .arg(
-            Arg::new(OPT_NOBANNER)
+            Arg::new(OPT_NOBANNER) // TODO(FEAT): Implement -n/--nobanner to remove broadcasting
+                // intro message
                 .short('n')
                 .long(OPT_NOBANNER)
                 .action(ArgAction::SetTrue)
                 .help(translate!("wall-help-nobanner"))
         )
         .arg(
-            Arg::new(OPT_TIMEOUT)
+            Arg::new(OPT_TIMEOUT) // TODO(FEAT): Implement -t --timeout to stop trying to print
+                // after passed a delay
                 .short('t')
                 .long(OPT_TIMEOUT)
                 .value_name("SECONDS")
@@ -138,16 +142,16 @@ fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
 
 }
 
-fn find_logged_users() -> Result<Vec<String>, WallError> {
-    let mut res = Vec::<String>::new();
+fn find_logged_users() -> Vec<OsString> {
+    let mut res = Vec::<OsString>::new();
     for ut in Utmpx::iter_all_records() {
-        if ut.is_user_process() { // it's a user's tty
-            let tty_path = String::from("/dev/") +
-                &ut.tty_device().to_string();
+        if ut.is_user_process() {
+            let mut tty_path = OsString::from("/dev/");
+            tty_path.push(OsString::from(&ut.tty_device().clone()));
             res.push(tty_path);
         }
     }
-    Ok(res)
+    res
 }
 
 fn wall_intro_message() -> String {
@@ -159,7 +163,6 @@ fn wall_intro_message() -> String {
     // Fetch the TTY of the process calling wall (requires OS-specific calls or a wrapper function)
     let tty = "/dev/".to_owned() + &get_sender();
 
-    // Use the dedicated date utility to get a formatted timestamp string
     let datetime = get_hour_and_date();
     #[cfg(target_os = "linux")]
     return format!(
@@ -173,8 +176,8 @@ fn wall_intro_message() -> String {
     );
 }
 
-fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
-    let transmission = wall_intro_message() + &message;
+fn write_to_terminals(message: String, users: Vec<OsString>) -> UResult<()> {
+    let transmission = wall_intro_message() + &message + "\r\n\r\n";
     for user in users {
         let mut file = match std::fs::OpenOptions::new()
             .write(true)
@@ -183,9 +186,12 @@ fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
                 Err(e) => {
                 eprintln!("{}: {}", translate!("wall-error-open-terminal"), e);
                 continue;
-                }
-            };
-        file.write_all(transmission.as_bytes())?;
+            }
+        };
+        write!(file, "{transmission}").map_err(|e| {
+            eprintln!("{}:, {e}", translate!("wall-error-write-terminal"));
+            WallError::Stdin(e)
+        })?;
     }
     Ok(())
 }
@@ -211,8 +217,6 @@ mod tests {
     use crate::{OPT_GROUP, STRING};
     use std::ffi::OsString;
     use std::process::{Command, Output};
-
-    use uucore::utmpx::Utmpx;
 
     #[test]
     fn test_basic_clap_implementation() {
@@ -286,8 +290,15 @@ mod tests {
 
     #[test]
     fn test_found_connected_users() {
-        let users = find_logged_users().unwrap();
-        assert_eq!(users, vec!(String::from("tty1"), String::from("tty2"), String::from("tty3")));
+        let users = find_logged_users();
+        assert_eq!(
+            users,
+            vec!(
+                OsString::from("tty1"),
+                OsString::from("tty2"),
+                OsString::from("tty3")
+            )
+        );
     }
 
     #[test]
@@ -296,7 +307,7 @@ mod tests {
         let _ = write_to_terminals(String::from("hello world!"), users);
         let _ = write_to_terminals(
             String::from("hello world!"),
-            vec![String::from("/dev/tty1")],
+            vec![OsString::from("/dev/tty1")],
         );
     }
 
