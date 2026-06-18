@@ -59,7 +59,8 @@ pub fn uu_app() -> Command {
         .about(translate!("wall-about"))
         .override_usage(format_usage(&translate!("pwd-usage")))
         .arg(
-            Arg::new(OPT_GROUP)
+            Arg::new(OPT_GROUP) // TODO(FEAT): Implement -g/--groups to target specific
+                // users inside a group
                 .short('g')
                 .long(OPT_GROUP)
                 .value_name("GROUP")
@@ -69,14 +70,16 @@ pub fn uu_app() -> Command {
                 .value_parser(clap::value_parser!(String)),
         )
         .arg(
-            Arg::new(OPT_NOBANNER)
+            Arg::new(OPT_NOBANNER) // TODO(FEAT): Implement -n/--nobanner to remove broadcasting
+                // intro message
                 .short('n')
                 .long(OPT_NOBANNER)
                 .action(ArgAction::SetTrue)
                 .help(translate!("wall-help-nobanner")),
         )
         .arg(
-            Arg::new(OPT_TIMEOUT)
+            Arg::new(OPT_TIMEOUT) // TODO(FEAT): Implement -t --timeout to stop trying to print
+                // after passed a delay
                 .short('t')
                 .long(OPT_TIMEOUT)
                 .value_name("SECONDS")
@@ -127,11 +130,12 @@ fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     Ok(res)
 }
 
-fn find_logged_users() -> Vec<String> {
-    let mut res = Vec::<String>::new();
+fn find_logged_users() -> Vec<OsString> {
+    let mut res = Vec::<OsString>::new();
     for ut in Utmpx::iter_all_records() {
         if ut.is_user_process() {
-            let tty_path = String::from("/dev/") + &ut.tty_device().clone();
+            let mut tty_path = OsString::from("/dev/");
+            tty_path.push(OsString::from(&ut.tty_device().clone()));
             res.push(tty_path);
         }
     }
@@ -147,7 +151,6 @@ fn wall_intro_message() -> String {
     // Fetch the TTY of the process calling wall (requires OS-specific calls or a wrapper function)
     let tty = "/dev/".to_owned() + &get_sender();
 
-    // Use the dedicated date utility to get a formatted timestamp string
     let datetime = get_hour_and_date();
     #[cfg(target_os = "linux")]
     return format!(
@@ -161,7 +164,7 @@ fn wall_intro_message() -> String {
     );
 }
 
-fn write_to_terminals(message: String, users: Vec<String>) -> UResult<()> {
+fn write_to_terminals(message: String, users: Vec<OsString>) -> UResult<()> {
     let transmission = wall_intro_message() + &message + "\r\n\r\n";
     for user in users {
         let mut file = match std::fs::OpenOptions::new().write(true).open(user) {
@@ -271,9 +274,9 @@ mod tests {
         assert_eq!(
             users,
             vec!(
-                String::from("tty1"),
-                String::from("tty2"),
-                String::from("tty3")
+                OsString::from("tty1"),
+                OsString::from("tty2"),
+                OsString::from("tty3")
             )
         );
     }
@@ -284,7 +287,7 @@ mod tests {
         let _ = write_to_terminals(String::from("hello world!"), users);
         let _ = write_to_terminals(
             String::from("hello world!"),
-            vec![String::from("/dev/tty1")],
+            vec![OsString::from("/dev/tty1")],
         );
     }
 
