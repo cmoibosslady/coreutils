@@ -6,15 +6,16 @@
 use clap::builder::ValueParser;
 use clap::parser::ValuesRef;
 use clap::{Arg, ArgAction, Command};
-use jiff::Zoned;use thiserror::Error;
+use jiff::Zoned;
 use rustix::system::uname;
 use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::io::prelude::*;
 use std::string::FromUtf8Error;
+use thiserror::Error;
 
-use uucore::error::{UResult, UError};
+use uucore::error::{UError, UResult};
 use uucore::format_usage;
 use uucore::utmpx::Utmpx;
 
@@ -38,13 +39,6 @@ enum WallError {
 
 impl UError for WallError {
     fn code(&self) -> i32 {
-        // change this to watch wall error codes?
-        // match self {
-        //     WallError::Stdin(_) => 1,
-        //     WallError::VecToString(_) => 1,
-        //     WallError::ToStringError => 1,
-        //     WallError::MacOsTooManyArgs => 16 or 1,
-        // }
         1
     }
 }
@@ -73,7 +67,7 @@ pub fn uu_app() -> Command {
                 .help(translate!("wall-help-group"))
                 .num_args(1)
                 .action(ArgAction::Append) // User can target more than one group
-                .value_parser(clap::value_parser!(String))
+                .value_parser(clap::value_parser!(String)),
         )
         .arg(
             Arg::new(OPT_NOBANNER) // TODO(FEAT): Implement -n/--nobanner to remove broadcasting
@@ -81,7 +75,7 @@ pub fn uu_app() -> Command {
                 .short('n')
                 .long(OPT_NOBANNER)
                 .action(ArgAction::SetTrue)
-                .help(translate!("wall-help-nobanner"))
+                .help(translate!("wall-help-nobanner")),
         )
         .arg(
             Arg::new(OPT_TIMEOUT) // TODO(FEAT): Implement -t --timeout to stop trying to print
@@ -90,29 +84,24 @@ pub fn uu_app() -> Command {
                 .long(OPT_TIMEOUT)
                 .value_name("SECONDS")
                 .help(translate!("wall-help-timeout"))
-                .num_args(1)
+                .num_args(1),
         )
         .arg(
             Arg::new(STRING)
                 .action(ArgAction::Append)
-                .value_parser(ValueParser::os_string())
+                .value_parser(ValueParser::os_string()),
         )
 }
-
 
 fn get_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     if args.len() == 0 {
         read_from_stdin()
+    } else if args.len() == 1 {
+        read_from_file(args.into_iter().next().unwrap())
+    } else if cfg!(target_os = "macos") {
+        Err(WallError::MacOsTooManyArgs)
     } else {
-        if args.len() == 1 {
-            read_from_file(args.into_iter().next().unwrap())
-        } else {
-            if cfg!(target_os = "macos") {
-                Err(WallError::MacOsTooManyArgs)
-            } else {
-                concatenate_message(args)
-            }
-        }
+        concatenate_message(args)
     }
 }
 
@@ -139,7 +128,6 @@ fn concatenate_message(args: ValuesRef<OsString>) -> Result<String, WallError> {
     }
     res.pop();
     Ok(res)
-
 }
 
 fn find_logged_users() -> Vec<OsString> {
@@ -179,12 +167,10 @@ fn wall_intro_message() -> String {
 fn write_to_terminals(message: String, users: Vec<OsString>) -> UResult<()> {
     let transmission = wall_intro_message() + &message + "\r\n\r\n";
     for user in users {
-        let mut file = match std::fs::OpenOptions::new()
-            .write(true)
-            .open(user) {
-                Ok(f) => f,
-                Err(e) => {
-                eprintln!("{}: {}", translate!("wall-error-open-terminal"), e);
+        let mut file = match std::fs::OpenOptions::new().write(true).open(user) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("{}: {e}", translate!("wall-error-open-terminal"));
                 continue;
             }
         };
@@ -212,9 +198,8 @@ fn get_sender() -> String {
 #[cfg(test)]
 mod tests {
 
-    use clap::parser::ValuesRef;
-    use crate::{uu_app, get_message, find_logged_users, write_to_terminals};
     use crate::{OPT_GROUP, STRING};
+    use crate::{find_logged_users, get_message, uu_app, write_to_terminals};
     use std::ffi::OsString;
     use std::process::{Command, Output};
 
@@ -222,11 +207,19 @@ mod tests {
     fn test_basic_clap_implementation() {
         let group = String::from("staff");
         let file = String::from("LICENSE");
-        let command = vec!("wall", "-g", &group, &file);
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command).expect("Error
-            outside of test perimeter");
+        let command = vec!["wall", "-g", &group, &file];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("Error outside of test perimeter");
         assert!(matches.get_one::<String>(OPT_GROUP).unwrap() == &group);
-        assert!(matches.get_one::<OsString>(STRING).unwrap().clone().into_string().unwrap() == file);
+        assert!(
+            matches
+                .get_one::<OsString>(STRING)
+                .unwrap()
+                .clone()
+                .into_string()
+                .unwrap()
+                == file
+        );
     }
 
     #[test]
@@ -238,25 +231,18 @@ mod tests {
         // file
         let mut command = Command::new("cat");
         command.arg(&file);
-        let output: Output = match command.output() {
-            Ok(o) => o,
-            Err(_) => panic!("Failed to start 'cat' command")
-        };
-        if !output.status.success() {
-            panic!("'cat' command exit with failure status")
-        }
-        let command_output = match String::from_utf8(output.stdout) {
-            Ok(o) => o,
-            Err(_) => panic!("Failed to convert 'cat' output")
-        };
+        let output: Output = command.output().expect("Failed to start 'cat' command");
+        assert!(
+            output.status.success(),
+            "'cat' command exit with failure status"
+        );
+        let command_output =
+            String::from_utf8(output.stdout).expect("Failed to convert 'cat'output");
 
-        let command = vec!("wall", &file);
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
-        command).expect("External error");
-        let pos_arg = match matches.get_many(STRING) {
-            Some(o) => o,
-            None => ValuesRef::<OsString>::default(),
-        };
+        let command = vec!["wall", &file];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("External error");
+        let pos_arg = matches.get_many(STRING).unwrap_or_default();
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, command_output);
     }
@@ -264,26 +250,20 @@ mod tests {
     #[test]
     fn test_get_message_on_stdin() {
         // for the moment test against cat is not implemented
-        let command = vec!("wall");
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
-        command).expect("External error");
-        let pos_arg = match matches.get_many(STRING) {
-            Some(o) => o,
-            None => ValuesRef::<OsString>::default(),
-        };
+        let command = vec!["wall"];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("External error");
+        let pos_arg = matches.get_many(STRING).unwrap_or_default();
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, "Hello !\n");
     }
 
     #[test]
     fn test_arguments_as_message() {
-        let command = vec!("wall", "Hello", "World", "!");
-        let matches = uucore::clap_localization::handle_clap_result(uu_app(),
-        command).expect("External error");
-        let pos_arg = match matches.get_many(STRING) {
-            Some(o) => o,
-            None => ValuesRef::<OsString>::default(),
-        };
+        let command = vec!["wall", "Hello", "World", "!"];
+        let matches = uucore::clap_localization::handle_clap_result(uu_app(), command)
+            .expect("External error");
+        let pos_arg = matches.get_many(STRING).unwrap_or_default();
         let function_output = get_message(pos_arg).unwrap();
         assert_eq!(function_output, "Hello World !");
     }
@@ -314,7 +294,6 @@ mod tests {
     #[test]
     fn test_get_sender() {
         let sender = crate::get_sender();
-        assert_eq!(sender, "tty1");
+        assert_eq!(sender, "pts/0");
     }
 }
-
